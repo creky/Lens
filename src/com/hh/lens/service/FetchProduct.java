@@ -1,6 +1,6 @@
 /**
  * @Project: Test
- * @Title: FetchLens.java
+ * @Title: FetchProduct.java
  * @Package: com.zol
  * @Description: 
  * @Author: hh
@@ -30,24 +30,42 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * @Classname: FetchLens
+ * @Classname: FetchProduct
  * @Description:
  * @Author: hh
  * @Date: 2013-1-27 下午12:05:57
  * @Version:
  */
-public class FetchLens
+public class FetchProduct
 {
+    private final static String LATEST_LENS_URL="http://detail.zol.com.cn/lens/new.html";
     private static DbUtils db=AppContext.db;
-	public static void fetchHistoryList(String lastUrl) throws Exception
+
+    public static void fetchLatestLens(){
+        try {
+            fetchLensList(LATEST_LENS_URL);
+        } catch (Exception e) {
+            Log.e(Constant.COMM_PREFIX,"Fetch lens error !",e);
+        }
+    }
+
+	public static void fetchLensList(String lastUrl) throws Exception
 	{
 		Log.d("正在获取地址：{}", lastUrl);
 		String html = ClientUtil.get(getFullUrl(lastUrl));
 		Document doc=Jsoup.parse(html);
-		Elements eles = doc.select(".list-item .pro-intro h3 a");
-		for (Element e : eles)
+		Elements eles = doc.select(".list-item");
+		for (Element item : eles)
 		{
-			String pageUrl = e.attr("href");
+           Elements priceType=item.select(".price-type");
+            if(priceType!=null&&priceType.text().contains("概念产品")){
+                continue;
+            }
+            Elements es=item.select(".pro-intro h3 a");
+            if(es==null||es.isEmpty()){
+                continue;
+            }
+			String pageUrl = es.get(0).attr("href");
 			analyzePage(pageUrl);
 			Thread.sleep(2000);
 		}
@@ -59,7 +77,7 @@ public class FetchLens
 		Thread.sleep(3000);
 		
 		if(StringUtils.isNotEmpty(nextUrl)){
-			fetchHistoryList(nextUrl);
+            fetchLensList(nextUrl);
 		}
 	}
 
@@ -153,9 +171,10 @@ public class FetchLens
 				attr.setProId(product.getProId());
 				// 参考价格
 				//attr.setAttrId(UniqueIdUtil.genId(Attribute.class));
-				attr.setAttrName(doc.select(".main .proprice li:eq(0) .pricetype").text().replace("：", ""));
-				String pStr = doc.select(".main .proprice li:eq(0) .price").text();
+				attr.setAttrName(doc.select(".main .product-price-info strong").get(0).ownText().replace("：", ""));
+				String pStr = doc.select(".main .price-type").text();
 				attr.setAttrValue(pStr);
+                db.save(attr);
 
 				Integer price = 0;
 				if (pStr.contains("万"))
@@ -180,9 +199,20 @@ public class FetchLens
 
 				// 商家报价
 //				attr.setAttrId(UniqueIdUtil.genId(Attribute.class));
-				attr.setAttrName(doc.select(".main .proprice li:eq(1) .pricetype").text().replace("：", ""));
-				attr.setAttrValue(doc.select(".main .proprice li:eq(1) a:contains(￥)").text());
+				attr.setAttrName(doc.select(".main .product-merchant-price strong").text().replace("：", ""));
+				attr.setAttrValue(doc.select(".main .product-merchant-price em a:contains(￥)").text());
                 db.save(attr);
+
+                Elements b2cPrice=doc.select(".main .product-b2c-price li");
+                if(b2cPrice!=null&&!b2cPrice.isEmpty()){
+                    for(Element e:b2cPrice){
+                        String name=e.select("strong a").get(0).ownText();
+                        String val=e.select(">span").text();
+                        attr.setAttrName(name);
+                        attr.setAttrValue(val);
+                        db.save(attr);
+                    }
+                }
 
 				Thread.sleep(1000);
 				analyzeParam(product);
@@ -216,7 +246,7 @@ public class FetchLens
 		{
 			String html = ClientUtil.get(getFullUrl(product.getReviewUrl()));
 			Document doc = Jsoup.parse(html);
-			Elements eles = doc.select(".comment_list>li");
+			Elements eles = doc.select(".comments-list>li.list-item");
 			for (Element ele : eles)
 			{
 				if (ele.hasClass("hide")||ele.attr("id").equals("selfRew")||ele.attr("style").contains("display: none")) continue;
@@ -225,7 +255,7 @@ public class FetchLens
 				Review review = new Review();
 //				review.setReviewId(UniqueIdUtil.genId(Review.class));
 				review.setProId(product.getProId());
-				String dtStr = ele.select(".feed_box .date").text().replace("发表于：", "").trim();
+				String dtStr = ele.select(".comments-date").text().trim();
 				
 				Date dt;
 				if (StringUtils.isNotEmpty(dtStr))
@@ -238,38 +268,40 @@ public class FetchLens
 				}
 				review.setPublishTime(dt);
 				
-				review.setTitle(ele.select(".feed_box .comment_tit").text());
-				review.setGoodPoint(ele.select(".feed_box .comment_content dl:has(.good) dd").text());
-				review.setBadPoint(ele.select(".feed_box .comment_content dl:has(.bad) dd").text());
-				review.setReviewCont(ele.select(".feed_box .comment_content dl:contains(总结) dd").text());
-				review.setAuthor(ele.select(".userinfo p:contains(点评)").text().replace("点评",""));
+				review.setTitle(ele.select(".comments-content h3").text());
+                Elements goodEles=ele.select(".comment-item:has(.good) p>span");
+                if(goodEles!=null&&!goodEles.isEmpty()){
+                    String cmt=goodEles.get(0).text();
+                    if(goodEles.size()>1){
+                        cmt+=goodEles.get(1).attr("data-text");
+                    }
+                    review.setGoodPoint(cmt);
+                }
+                Elements badEles=ele.select(".comment-item:has(.bad) p>span");
+                if(badEles!=null&&!badEles.isEmpty()){
+                    String cmt=badEles.get(0).text();
+                    if(badEles.size()>1){
+                        cmt+=badEles.get(1).attr("data-text");
+                    }
+                    review.setBadPoint(cmt);
+                }
+                Elements sumEles=ele.select(".comment-item:has(.summary) p>span");
+                if(sumEles!=null&&!sumEles.isEmpty()){
+                    String cmt=sumEles.get(0).text();
+                    if(sumEles.size()>1){
+                        cmt+=sumEles.get(1).attr("data-text");
+                    }
+                    review.setReviewCont(cmt);
+                }
+				review.setAuthor(ele.select(".comments-user .comments-user-name").text());
 				
-				String score=ele.select(".feed_box .feed_star .lv").text();
-				if(StringUtils.isEmpty(score)||"推荐".equals(score)){
-					try
-					{
-						score=ele.select(".feed_box .feed_star .zstar em").attr("style");
-						Pattern pattern=Pattern.compile("width:(\\d+)%");
-						Matcher matcher=pattern.matcher(score);
-						if(matcher.find()){
-							score=matcher.group(1);
-							review.setScore(Float.parseFloat(score)/20f);//x/100*5
-						}else{
-							review.setScore(0f);
-						}
-					}
-					catch (Exception e)
-					{
-						review.setScore(0f);
-					}
-				}else{
-					review.setScore(Float.parseFloat(score));
-				}
-				
-				String agree=ele.select(".feed_box .isok span[id^=ok_]").text();
+				String score=ele.select(".single-score .score strong").text();
+                review.setScore(Float.parseFloat(score));
+
+				String agree=ele.select(".J_usefulNum").text();
 				review.setAgree(Integer.parseInt(StringUtils.isEmpty(agree)?"0":agree));
-				String oppose=ele.select(".feed_box .isok span[id^=no_]").text();
-				review.setOppose(Integer.parseInt(StringUtils.isEmpty(oppose)?"0":oppose));
+//				String oppose=ele.select(".feed_box .isok span[id^=no_]").text();
+//				review.setOppose(Integer.parseInt(StringUtils.isEmpty(oppose)?"0":oppose));
 				
 				if (!(StringUtils.isEmpty(review.getGoodPoint()) && StringUtils.isEmpty(review.getBadPoint()) && StringUtils
 						.isEmpty(review.getReviewCont())))
@@ -285,12 +317,12 @@ public class FetchLens
 			//sqlSession.commit();
 
 			// 递归处理下一页
-			String nextPageUrl = doc.select(".pagebar a:contains(下一页)").attr("href");
-			if (StringUtils.isNotEmpty(nextPageUrl))
-			{
-				product.setReviewUrl(nextPageUrl);
-				analyzeReview(product);
-			}
+//			String nextPageUrl = doc.select(".pagebar a:contains(下一页)").attr("href");
+//			if (StringUtils.isNotEmpty(nextPageUrl))
+//			{
+//				product.setReviewUrl(nextPageUrl);
+//				analyzeReview(product);
+//			}
 
 		}
 		catch (Exception e)
@@ -318,14 +350,14 @@ public class FetchLens
 			if (doc.select(".nocomment").text().length() > 0) return;
 			Comment comment = new Comment();
 			comment.setProId(product.getProId());
-			comment.setScore(Float.parseFloat(doc.select(".average .score").text()));
-			Elements goods = doc.select(".good-part .scmtlist li");
+			comment.setScore(Float.parseFloat(doc.select("#totalPoint .score strong").text()));
+			Elements goods = doc.select(".good-words li");
 			comment.setCommentCata("优点");
 
 			StringBuffer sb = new StringBuffer();
 			for (Element e : goods)
 			{
-				sb.append(e.html()).append("<br/>");
+				sb.append(e.text()).append("<br/>");
 			}
 			String cont = null;
 			if (sb.length() >= 5)
@@ -334,18 +366,18 @@ public class FetchLens
 			}
 			comment.setCommentCont(cont);
 
-			String ok_good = doc.select("#ok_good").text();
-			comment.setAgree(Integer.parseInt(StringUtils.isEmpty(ok_good) ? "0" : ok_good));
-			String no_good = doc.select("#no_good").text();
-			comment.setOppose(Integer.parseInt(StringUtils.isEmpty(no_good) ? "0" : no_good));
+//			String ok_good = doc.select("#ok_good").text();
+//			comment.setAgree(Integer.parseInt(StringUtils.isEmpty(ok_good) ? "0" : ok_good));
+//			String no_good = doc.select("#no_good").text();
+//			comment.setOppose(Integer.parseInt(StringUtils.isEmpty(no_good) ? "0" : no_good));
 //			comment.setCommentId(UniqueIdUtil.genId(Comment.class));
 			db.save(comment);
 
-			Elements bads = doc.select(".bad-part .scmtlist li");
+			Elements bads = doc.select(".bad-words li");
 			comment.setCommentCata("缺点");
 			for (Element e : bads)
 			{
-				sb.append(e.html()).append("<br/>");
+				sb.append(e.text()).append("<br/>");
 			}
 
 			cont = null;
@@ -355,10 +387,10 @@ public class FetchLens
 			}
 			comment.setCommentCont(cont);
 
-			String ok_bad = doc.select("#ok_bad").text();
-			comment.setAgree(Integer.parseInt(StringUtils.isEmpty(ok_bad) ? "0" : ok_bad));
-			String no_bad = doc.select("#no_bad").text();
-			comment.setOppose(Integer.parseInt(StringUtils.isEmpty(no_bad) ? "0" : no_bad));
+//			String ok_bad = doc.select("#ok_bad").text();
+//			comment.setAgree(Integer.parseInt(StringUtils.isEmpty(ok_bad) ? "0" : ok_bad));
+//			String no_bad = doc.select("#no_bad").text();
+//			comment.setOppose(Integer.parseInt(StringUtils.isEmpty(no_bad) ? "0" : no_bad));
 //			comment.setCommentId(UniqueIdUtil.genId(Comment.class));
 			db.save(comment);
 			//sqlSession.commit();
@@ -398,12 +430,12 @@ public class FetchLens
 				article.setDetailUrl(ele.select(".title h4 a").attr("href"));
 				String dt = ele.select(".title p .date").text();
 				article.setPublishTime((new SimpleDateFormat("yyyy-MM-dd").parse(dt)));
-				article.setAuthor(ele.select(".title p").text().replace(dt, "").replace("作者：", "").trim());
-				article.setSummaryCont(ele.select(".summary").text().replace("查看详细 »", "").trim());
-				String imgUrl = ele.select(".pic img").attr("src");
-				String path = ClientUtil.getAndSaveFile(getFullUrl(imgUrl), null, Constant.PIC_FOLDER, product.getProId()
-						.toString(), null);
-				article.setMainPic(path);
+				article.setAuthor(ele.select(".title p").get(0).ownText().replace("作者：", "").trim());
+				article.setSummaryCont(ele.select(".summary").get(0).ownText().trim());
+//				String imgUrl = ele.select(".pic img").attr("src");
+//				String path = ClientUtil.getAndSaveFile(getFullUrl(imgUrl), null, Constant.PIC_FOLDER, product.getProId()
+//						.toString(), null);
+//				article.setMainPic(path);
 				if (StringUtils.isNotEmpty(article.getSummaryCont()) && StringUtils.isNotEmpty(article.getTitle()))
 				{
 					db.save(article);
@@ -448,18 +480,15 @@ public class FetchLens
 				{
 //					pic.setPicId(UniqueIdUtil.genId(Pic.class));
 
-					String bigPicHtml = ClientUtil.get(getFullUrl(p.select("a").attr("href")));
-					Document dc = Jsoup.parse(bigPicHtml);
-					pic.setPicUrl(dc.select("#bigImage .state img").attr("src"));
-					pic.setPicName(dc.select("#bigImage .state img").attr("alt"));
-					
-					if(StringUtils.isEmpty(pic.getPicUrl())){
-						pic.setPicUrl(p.select("a img").attr(".src"));
-					}
-					if (StringUtils.isEmpty(pic.getPicName()))
-					{
-						pic.setPicName(p.select("a span").text());
-					}
+					String picUrl=p.select("a img").attr(".src");
+                    pic.setPicUrl(picUrl.replaceAll("_\\d{3}x\\d{3}",""));
+                    pic.setPicName(p.select("a span").text());
+                    if(StringUtils.isEmpty(picUrl)||StringUtils.isEmpty(pic.getPicName())) {
+                        String bigPicHtml = ClientUtil.get(getFullUrl(p.select("a").attr("href")));
+                        Document dc = Jsoup.parse(bigPicHtml);
+                        pic.setPicUrl(dc.select("#bigImage .state img").attr("src"));
+                        pic.setPicName(dc.select("#bigImage .state img").attr("alt"));
+                    }
 
 					String path = ClientUtil.getAndSaveFile(getFullUrl(pic.getPicUrl()), null, Constant.PIC_FOLDER, product
 							.getProId().toString(), null);

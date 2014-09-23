@@ -6,14 +6,9 @@ import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import com.hh.lens.Constant;
+import com.hh.lens.util.ClientUtil;
 import com.hh.lens.util.ImageUtils;
 import com.hh.lens.vo.Pic;
-import com.lidroid.xutils.HttpUtils;
-import com.lidroid.xutils.exception.HttpException;
-import com.lidroid.xutils.http.HttpHandler;
-import com.lidroid.xutils.http.RequestParams;
-import com.lidroid.xutils.http.ResponseInfo;
-import com.lidroid.xutils.http.callback.RequestCallBack;
 
 import java.io.File;
 import java.util.Queue;
@@ -27,11 +22,13 @@ public class HttpService {
     private Runnable downRunnable = null;
 
     private static HttpService ins;
-    private HttpService(){
+
+    private HttpService() {
     }
-    public static HttpService getInstance(){
-        if(ins==null){
-            ins=new HttpService();
+
+    public static HttpService getInstance() {
+        if (ins == null) {
+            ins = new HttpService();
         }
         return ins;
     }
@@ -59,10 +56,10 @@ public class HttpService {
         @Override
         public void run() {
             Pic pic;
-            while ((pic=downloadQueue.poll())!=null){
+            while ((pic = downloadQueue.poll()) != null) {
                 downloadPic4Queue(pic);
             }
-            downRunnable =null;
+            downRunnable = null;
         }
 
         public void downloadPic4Queue(final Pic pic) {
@@ -71,28 +68,21 @@ public class HttpService {
             if (!file.exists()) {
                 file.mkdirs();
             }
-            HttpUtils http = new HttpUtils();
-            RequestParams requestParams=new RequestParams();
-            requestParams.setHeader(Constant.USER_AGENT_NAME,Constant.USER_AGENT);
-            HttpHandler handler = http.download(pic.getPicUrl(), Constant.PIC_FOLDER + pic.getPicPath(), true, true, new RequestCallBack<File>() {
-                @Override
-                public void onSuccess(ResponseInfo<File> fileResponseInfo) {
-                    Log.i(Constant.COMM_PREFIX, "Download file successful,file name=" + fileResponseInfo.result.getName());
-                    Bitmap img = ImageUtils.loadImgThumbnail(pic.getPicPath(), Constant.IMG_THUMB_WIDTH, Constant.IMG_THUMB_HEIGHT, context, true);
-                    //view.setImageBitmap(img);
-                    if(view instanceof ImageView){
-                        ImageView imgView=(ImageView) view;
-                        imgView.setImageBitmap(img);
-                        imgView.postInvalidate();
-                    }
-                }
 
-                @Override
-                public void onFailure(HttpException e, String s) {
-                    Log.i(Constant.COMM_PREFIX, "Download file failed !", e);
+            String path = null;
+            try {
+                path = ClientUtil.getAndSaveFile(pic.getPicUrl(), null, Constant.PIC_FOLDER, String.valueOf(pic.getProId()), null);
+                Log.i(Constant.COMM_PREFIX, "Download file successful,file name=" + path);
+                Bitmap img = ImageUtils.loadImgThumbnail(pic.getPicPath(), Constant.IMG_THUMB_WIDTH, Constant.IMG_THUMB_HEIGHT, context, true);
+                //view.setImageBitmap(img);
+                if (view instanceof ImageView) {
+                    ImageView imgView = (ImageView) view;
+                    imgView.setImageBitmap(img);
+                    imgView.postInvalidate();
                 }
-            });
-
+            } catch (Exception e) {
+                Log.e(Constant.COMM_PREFIX, "Download file failed !", e);
+            }
         }
     }
 }
