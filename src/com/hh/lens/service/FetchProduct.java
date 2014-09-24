@@ -23,9 +23,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,6 +38,8 @@ public class FetchProduct
 {
     private final static String LATEST_LENS_URL="http://detail.zol.com.cn/lens/new.html";
     private static DbUtils db=AppContext.db;
+    private final static int MAX_EXT_NUM=3;
+    private static int findEmptyPageNum=0;
 
     public static void fetchLatestLens(){
         try {
@@ -55,6 +55,7 @@ public class FetchProduct
 		String html = ClientUtil.get(getFullUrl(lastUrl));
 		Document doc=Jsoup.parse(html);
 		Elements eles = doc.select(".list-item");
+        List<String> notExistProList=new ArrayList<String>();
 		for (Element item : eles)
 		{
            Elements priceType=item.select(".price-type");
@@ -66,15 +67,31 @@ public class FetchProduct
                 continue;
             }
 			String pageUrl = es.get(0).attr("href");
-			analyzePage(pageUrl);
-			Thread.sleep(2000);
+            Integer proId=getProductId(pageUrl);
+            Product pro=db.findById(Product.class,proId);
+            if(pro==null) {
+                notExistProList.add(pageUrl);
+
+            }
 		}
+
+        if(notExistProList.size()>0){
+            findEmptyPageNum=0;
+            for(String url:notExistProList){
+                analyzePage(url);
+                Thread.sleep(2000);
+            }
+        }else if(findEmptyPageNum >MAX_EXT_NUM){
+            return;
+        }else{
+            findEmptyPageNum++;
+        }
 		
 		String nextUrl=doc.select(".pagebar a.next").attr("href");
 		Map<String, Object> map = new HashMap<String, Object>();
 		map.put("lastUrl", nextUrl);
 		//sqlSession.update("updateLastUrl", map);
-		Thread.sleep(3000);
+		Thread.sleep(1000);
 		
 		if(StringUtils.isNotEmpty(nextUrl)){
             fetchLensList(nextUrl);
@@ -128,12 +145,10 @@ public class FetchProduct
 		{
 			product.setSummaryUrl(pageUrl);
 			product.setUpdateTime(new Date());
-			Pattern pattern = Pattern.compile("index(\\d{1,10})\\.shtml");
-			Matcher matcher = pattern.matcher(pageUrl);
-			if (matcher.find())
-			{
-				product.setProId(Integer.parseInt(matcher.group(1)));
-			}
+            int proId = getProductId(pageUrl);
+            if(proId>0){
+                product.setProId(proId);
+            }
 
             if(product.getProId()!=null) {
                 product = db.findById(Product.class, product.getProId());
@@ -230,7 +245,18 @@ public class FetchProduct
 		}
 	}
 
-	/**
+    private static int getProductId(String url) {
+        int proId=0;
+        Pattern pattern = Pattern.compile("index(\\d{1,10})\\.shtml");
+        Matcher matcher = pattern.matcher(url);
+        if (matcher.find())
+        {
+            proId=Integer.parseInt(matcher.group(1));
+        }
+        return proId;
+    }
+
+    /**
 	 * 获取点评
 	 * 
 	 * @Methodname: analyzeReview
